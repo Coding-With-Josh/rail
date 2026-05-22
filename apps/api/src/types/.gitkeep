@@ -1,0 +1,2 @@
+// API-local type augmentations (e.g. Fastify request decorations).
+// Domain types live in @repo/types.

@@ -1,0 +1,125 @@
+-- RAIL API — Initial Schema Migration
+-- Generated: 2026-05-22
+
+CREATE TYPE "user_role" AS ENUM ('admin', 'operator', 'viewer');
+CREATE TYPE "user_status" AS ENUM ('active', 'suspended', 'invited');
+CREATE TYPE "pairing_state" AS ENUM ('pending', 'approved', 'expired', 'rejected');
+CREATE TYPE "command_status" AS ENUM ('pending', 'delivered', 'acknowledged', 'failed');
+
+CREATE TABLE "organizations" (
+  "id" text PRIMARY KEY,
+  "name" text NOT NULL,
+  "slug" text NOT NULL UNIQUE,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "users" (
+  "id" text PRIMARY KEY,
+  "name" text NOT NULL,
+  "email" text NOT NULL UNIQUE,
+  "password_hash" text NOT NULL,
+  "role" "user_role" NOT NULL DEFAULT 'viewer',
+  "status" "user_status" NOT NULL DEFAULT 'active',
+  "organization_id" text NOT NULL REFERENCES "organizations"("id"),
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "sessions" (
+  "id" text PRIMARY KEY,
+  "user_id" text NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "organization_id" text NOT NULL,
+  "refresh_token_hash" text NOT NULL,
+  "ip_address" text,
+  "user_agent" text,
+  "revoked_at" timestamp,
+  "expires_at" timestamp NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "devices" (
+  "id" text PRIMARY KEY,
+  "device_id" text NOT NULL UNIQUE,
+  "organization_id" text NOT NULL REFERENCES "organizations"("id"),
+  "assigned_user_id" text REFERENCES "users"("id"),
+  "secret_hash" text NOT NULL,
+  "firmware_version" text NOT NULL,
+  "capabilities" text[] NOT NULL DEFAULT '{}',
+  "is_online" boolean NOT NULL DEFAULT false,
+  "is_revoked" boolean NOT NULL DEFAULT false,
+  "last_seen_at" timestamp,
+  "enrolled_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "device_sessions" (
+  "id" text PRIMARY KEY,
+  "device_id" text NOT NULL REFERENCES "devices"("id") ON DELETE CASCADE,
+  "organization_id" text NOT NULL,
+  "refresh_token_hash" text NOT NULL,
+  "revoked_at" timestamp,
+  "expires_at" timestamp NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "pairing_sessions" (
+  "id" text PRIMARY KEY,
+  "hardware_id" text NOT NULL,
+  "firmware_version" text NOT NULL,
+  "capabilities" text[] NOT NULL DEFAULT '{}',
+  "pairing_code" text NOT NULL UNIQUE,
+  "state" "pairing_state" NOT NULL DEFAULT 'pending',
+  "organization_id" text REFERENCES "organizations"("id"),
+  "assigned_user_id" text REFERENCES "users"("id"),
+  "approved_by" text REFERENCES "users"("id"),
+  "expires_at" timestamp NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "heartbeat_logs" (
+  "id" text PRIMARY KEY,
+  "device_id" text NOT NULL REFERENCES "devices"("id") ON DELETE CASCADE,
+  "organization_id" text NOT NULL REFERENCES "organizations"("id"),
+  "battery" integer,
+  "signal" integer,
+  "uptime" integer,
+  "status" text NOT NULL DEFAULT 'online',
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "telemetry_logs" (
+  "id" text PRIMARY KEY,
+  "device_id" text NOT NULL REFERENCES "devices"("id") ON DELETE CASCADE,
+  "organization_id" text NOT NULL REFERENCES "organizations"("id"),
+  "payload" jsonb NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "command_logs" (
+  "id" text PRIMARY KEY,
+  "device_id" text NOT NULL REFERENCES "devices"("id") ON DELETE CASCADE,
+  "organization_id" text NOT NULL REFERENCES "organizations"("id"),
+  "issued_by" text NOT NULL REFERENCES "users"("id"),
+  "type" text NOT NULL,
+  "payload" jsonb,
+  "nonce" text NOT NULL UNIQUE,
+  "status" "command_status" NOT NULL DEFAULT 'pending',
+  "acknowledged_at" timestamp,
+  "expires_at" timestamp NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "revoked_tokens" (
+  "id" text PRIMARY KEY,
+  "jti" text NOT NULL UNIQUE,
+  "expires_at" timestamp NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+-- Indexes for common query patterns
+CREATE INDEX ON "heartbeat_logs" ("device_id", "created_at" DESC);
+CREATE INDEX ON "telemetry_logs" ("device_id", "created_at" DESC);
+CREATE INDEX ON "command_logs" ("device_id", "status");
+CREATE INDEX ON "revoked_tokens" ("jti");
+CREATE INDEX ON "devices" ("organization_id");
+CREATE INDEX ON "pairing_sessions" ("pairing_code", "state");

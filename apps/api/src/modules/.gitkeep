@@ -1,0 +1,2 @@
+// Route modules go here. Each module exports a Fastify plugin.
+// e.g. devices, alerts, auth, telemetry, map

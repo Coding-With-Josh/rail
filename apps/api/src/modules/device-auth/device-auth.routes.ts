@@ -11,12 +11,14 @@ const bootstrapSchema = z.object({
   hardwareId: z.string().min(1),
   firmwareVersion: z.string().min(1),
   capabilities: z.array(z.string()).default([]),
+  deviceType: z.enum(["esp32", "mobile"]).default("esp32"),
 })
 
 const approveSchema = z.object({
   pairingCode: z.string().min(1),
   organizationId: z.string().min(1),
   assignedUserId: z.string().optional(),
+  deviceType: z.enum(["esp32", "mobile"]).default("esp32"),
 })
 
 const DEVICE_REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -94,7 +96,7 @@ export async function deviceAuthRoutes(app: FastifyInstance) {
     const body = approveSchema.safeParse(req.body)
     if (!body.success) return reply.status(400).send({ error: "Invalid payload" })
 
-    const { pairingCode, organizationId, assignedUserId } = body.data
+    const { pairingCode, organizationId, assignedUserId, deviceType } = body.data
 
     if (req.authUser!.organizationId !== organizationId) {
       return reply.status(403).send({ error: "Organization mismatch" })
@@ -118,7 +120,7 @@ export async function deviceAuthRoutes(app: FastifyInstance) {
 
     const [device] = await db
       .insert(devices)
-      .values({ deviceId, organizationId, assignedUserId: assignedUserId ?? null, secretHash, firmwareVersion: pairing.firmwareVersion, capabilities: pairing.capabilities })
+      .values({ deviceId, organizationId, assignedUserId: assignedUserId ?? null, secretHash, firmwareVersion: pairing.firmwareVersion, capabilities: pairing.capabilities, deviceType })
       .returning()
 
     await db

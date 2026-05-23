@@ -2,10 +2,14 @@ import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { db } from "../../db/index.js"
 import { devices, heartbeatLogs, telemetryLogs } from "../../db/schema.js"
-import { eq, desc, sql } from "drizzle-orm"
+import { eq, desc, sql, inArray } from "drizzle-orm"
 import { authenticateDevice } from "../../middleware/authenticate-device.js"
 import { authenticate } from "../../middleware/authenticate.js"
 import { broadcastToOrg } from "../websocket/ws.gateway.js"
+
+/* ---------------------------------------
+   VALIDATION SCHEMAS
+---------------------------------------- */
 
 const heartbeatSchema = z.object({
   battery: z.number().int().min(0).max(100).optional(),
@@ -18,10 +22,18 @@ const telemetrySchema = z.object({
   payload: z.record(z.unknown()),
 })
 
+/* ---------------------------------------
+   ROUTES
+---------------------------------------- */
+
 export async function deviceRoutes(app: FastifyInstance) {
-  // GET /devices/stats — org-scoped counts for dashboard
+
+  /* ---------------------------------------
+     DEVICE STATS
+  ---------------------------------------- */
   app.get("/stats", { preHandler: authenticate }, async (req, reply) => {
     const orgId = req.authUser!.organizationId
+
     const rows = await db
       .select({
         total: sql<number>`count(*)::int`,
@@ -29,77 +41,150 @@ export async function deviceRoutes(app: FastifyInstance) {
       })
       .from(devices)
       .where(eq(devices.organizationId, orgId))
-    return reply.send({ total: rows[0].total, online: rows[0].online, alerts: 0 })
-  })
-
-  // GET /devices — list all devices with latest heartbeat
-  app.get("/", { preHandler: authenticate }, async (req, reply) => {
-    const orgDevices = await db.select().from(devices).where(eq(devices.organizationId, req.authUser!.organizationId))
-
-    // Fetch latest heartbeat for each device in one query using DISTINCT ON
-    const latestHeartbeats = orgDevices.length
-      ? await db.execute(sql`
-          SELECT DISTINCT ON (device_id) device_id, battery, signal, uptime, status, created_at
-          FROM heartbeat_logs
-          WHERE device_id = ANY(${orgDevices.map(d => d.id)})
-          ORDER BY device_id, created_at DESC
-        `)
-      : { rows: [] }
-
-    const heartbeatMap = new Map(
-      (latestHeartbeats.rows as any[]).map(r => [r.device_id, r])
-    )
 
     return reply.send({
-      devices: orgDevices.map(d => ({
-        ...d,
-        latestHeartbeat: heartbeatMap.get(d.id) ?? null,
+      total: rows[0]?.total ?? 0,
+      online: rows[0]?.online ?? 0,
+      alerts: 0,
+    })
+  })
+
+  /* ---------------------------------------
+     GET ALL DEVICES (WITH HEARTBEATS)
+  ---------------------------------------- */
+  app.get("/", { preHandler: authenticate }, async (req, reply) => {
+    const orgId = req.authUser!.organizationId
+
+    const orgDevices = await db
+      .select()
+      .from(devices)
+      .where(eq(devices.organizationId, orgId))
+
+    if (orgDevices.length === 0) {
+      return reply.send({ devices: [] })
+    }
+
+    const deviceIds = orgDevices.map(d => d.id)
+
+    // SAFE heartbeat fetch (NO RAW SQL, NO ANY())
+    const latestHeartbeats = await db
+      .select({
+        deviceId: heartbeatLogs.deviceId,
+        battery: heartbeatLogs.battery,
+        signal: heartbeatLogs.signal,
+        uptime: heartbeatLogs.uptime,
+        status: heartbeatLogs.status,
+        createdAt: heartbeatLogs.createdAt,
+      })
+      .from(heartbeatLogs)
+      .where(inArray(heartbeatLogs.deviceId, deviceIds))
+      .orderBy(
+        heartbeatLogs.deviceId,
+        desc(heartbeatLogs.createdAt)
+      )
+
+    // Keep only latest heartbeat per device
+    const heartbeatMap = new Map<string, any>()
+
+    for (const hb of latestHeartbeats) {
+      if (!heartbeatMap.has(hb.deviceId)) {
+        heartbeatMap.set(hb.deviceId, hb)
+      }
+    }
+
+    return reply.send({
+      devices: orgDevices.map(device => ({
+        ...device,
+        latestHeartbeat: heartbeatMap.get(device.id) ?? null,
       })),
     })
   })
 
-  // GET /devices/:id
+  /* ---------------------------------------
+     GET SINGLE DEVICE
+  ---------------------------------------- */
   app.get("/:id", { preHandler: authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string }
+
     const [device] = await db
       .select()
       .from(devices)
       .where(eq(devices.deviceId, id))
       .limit(1)
+
     if (!device || device.organizationId !== req.authUser!.organizationId) {
       return reply.status(404).send({ error: "Device not found" })
     }
+
     return reply.send({ device })
   })
 
-  // POST /devices/:id/revoke
+  /* ---------------------------------------
+     REVOKE DEVICE
+  ---------------------------------------- */
   app.post("/:id/revoke", { preHandler: authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const [device] = await db.select().from(devices).where(eq(devices.deviceId, id)).limit(1)
+
+    const [device] = await db
+      .select()
+      .from(devices)
+      .where(eq(devices.deviceId, id))
+      .limit(1)
+
     if (!device || device.organizationId !== req.authUser!.organizationId) {
       return reply.status(404).send({ error: "Device not found" })
     }
-    await db.update(devices).set({ isRevoked: true, updatedAt: new Date() }).where(eq(devices.id, device.id))
-    broadcastToOrg(device.organizationId, "device.revoked", { deviceId: id })
+
+    await db
+      .update(devices)
+      .set({
+        isRevoked: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(devices.id, device.id))
+
+    broadcastToOrg(device.organizationId, "device.revoked", {
+      deviceId: id,
+    })
+
     return reply.send({ ok: true })
   })
-  // POST /device/heartbeat
-  app.post("/heartbeat", { preHandler: authenticateDevice }, async (req, reply) => {
-    const body = heartbeatSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: "Invalid payload" })
 
-    const { battery, signal, uptime, status } = body.data
-    const { sub: deviceDbId, organizationId } = req.authDevice!
+  /* ---------------------------------------
+     HEARTBEAT (DEVICE → API)
+  ---------------------------------------- */
+  app.post("/heartbeat", { preHandler: authenticateDevice }, async (req, reply) => {
+    const parsed = heartbeatSchema.safeParse(req.body)
+
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "Invalid payload" })
+    }
+
+    const { battery, signal, uptime, status } = parsed.data
+    const { sub: deviceDbId, organizationId, deviceId } = req.authDevice!
 
     await Promise.all([
-      db.update(devices)
-        .set({ isOnline: true, lastSeenAt: new Date(), updatedAt: new Date() })
+      db
+        .update(devices)
+        .set({
+          isOnline: true,
+          lastSeenAt: new Date(),
+          updatedAt: new Date(),
+        })
         .where(eq(devices.id, deviceDbId)),
-      db.insert(heartbeatLogs).values({ deviceId: deviceDbId, organizationId, battery, signal, uptime, status }),
+
+      db.insert(heartbeatLogs).values({
+        deviceId: deviceDbId,
+        organizationId,
+        battery,
+        signal,
+        uptime,
+        status,
+      }),
     ])
 
     broadcastToOrg(organizationId, "device.heartbeat", {
-      deviceId: req.authDevice!.deviceId,
+      deviceId,
       battery,
       signal,
       uptime,
@@ -110,22 +195,27 @@ export async function deviceRoutes(app: FastifyInstance) {
     return reply.send({ ok: true })
   })
 
-  // POST /device/telemetry
+  /* ---------------------------------------
+     TELEMETRY
+  ---------------------------------------- */
   app.post("/telemetry", { preHandler: authenticateDevice }, async (req, reply) => {
-    const body = telemetrySchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: "Invalid payload" })
+    const parsed = telemetrySchema.safeParse(req.body)
 
-    const { sub: deviceDbId, organizationId } = req.authDevice!
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "Invalid payload" })
+    }
+
+    const { sub: deviceDbId, organizationId, deviceId } = req.authDevice!
 
     await db.insert(telemetryLogs).values({
       deviceId: deviceDbId,
       organizationId,
-      payload: body.data.payload,
+      payload: parsed.data.payload,
     })
 
     broadcastToOrg(organizationId, "device.telemetry", {
-      deviceId: req.authDevice!.deviceId,
-      ...body.data.payload,
+      deviceId,
+      ...parsed.data.payload,
       ts: Date.now(),
     })
 

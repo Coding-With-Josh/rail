@@ -3,6 +3,7 @@ import { Instrument_Sans } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
+import { SessionProvider } from "next-auth/react";
 
 const sans = Instrument_Sans({
   subsets: ["latin"],
@@ -21,10 +22,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={sans.className}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem scriptProps={{ suppressHydrationWarning: true }}>
+        <SessionProvider>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <ThemeToggle />
           {children}
         </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );

@@ -5,6 +5,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "web:dev": "turbo dev --filter=web",
+    "mobile:dev": "npx expo start --filter=mobile",
     "api:dev": "turbo dev --filter=api",
     "docs:dev": "turbo dev --filter=docs",
     "lint": "turbo run lint",

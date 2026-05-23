@@ -6,6 +6,7 @@ import rateLimit from "@fastify/rate-limit"
 import { authRoutes } from "./modules/auth/auth.routes.js"
 import { deviceAuthRoutes } from "./modules/device-auth/device-auth.routes.js"
 import { deviceRoutes } from "./modules/device/device.routes.js"
+import { alertRoutes } from "./modules/alerts/alert.routes.js"
 import { wsGateway } from "./modules/websocket/ws.gateway.js"
 
 export async function buildApp() {
@@ -23,6 +24,7 @@ export async function buildApp() {
   await app.register(deviceAuthRoutes, { prefix: "/device" })
   await app.register(deviceRoutes, { prefix: "/device" })   // heartbeat, telemetry
   await app.register(deviceRoutes, { prefix: "/devices" })  // list, get, revoke
+  await app.register(alertRoutes, { prefix: "/alerts" })
   await app.register(wsGateway)
 
   return app

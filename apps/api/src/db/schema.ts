@@ -43,6 +43,7 @@ export const devices = pgTable("devices", {
   secretHash: text("secret_hash").notNull(),
   firmwareVersion: text("firmware_version").notNull(),
   capabilities: text("capabilities").array().notNull().default([]),
+  deviceType: text("device_type", { enum: ["esp32", "mobile"] }).notNull().default("esp32"),
   isOnline: boolean("is_online").notNull().default(false),
   isRevoked: boolean("is_revoked").notNull().default(false),
   lastSeenAt: timestamp("last_seen_at"),
@@ -116,5 +117,24 @@ export const revokedTokens = pgTable("revoked_tokens", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   jti: text("jti").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const alertSeverityEnum = pgEnum("alert_severity", ["low", "medium", "high", "critical"])
+export const alertStatusEnum = pgEnum("alert_status", ["active", "acknowledged", "resolved"])
+
+export const alerts = pgTable("alerts", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  deviceId: text("device_id").notNull().references(() => devices.id, { onDelete: "cascade" }),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  type: text("type").notNull(), // "sos" | "low_battery" | "geofence" etc.
+  severity: alertSeverityEnum("severity").notNull().default("critical"),
+  status: alertStatusEnum("status").notNull().default("active"),
+  lat: text("lat"),
+  lng: text("lng"),
+  triggerSource: text("trigger_source"), // "watch_button" | "phone_button" | "auto"
+  acknowledgedBy: text("acknowledged_by").references(() => users.id),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 })

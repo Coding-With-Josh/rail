@@ -74,10 +74,10 @@ function Section({ title, description, children }: { title: string; description:
 
 export default function SettingsPage() {
   // General
-  const [orgName, setOrgName] = useState("Guardian X");
-  const [orgUrl, setOrgUrl] = useState("guardian-x.app");
-  const [contactEmail, setContactEmail] = useState("admin@guardian-x.app");
-  const [timezone, setTimezone] = useState("UTC+01:00 — Lagos");
+  const [orgName, setOrgName] = useState("University Preparatory Secondary School");
+  const [orgUrl, setOrgUrl] = useState("upsshub.com");
+  const [contactEmail, setContactEmail] = useState("info@upsshub.com");
+  const [timezone, setTimezone] = useState("UTC+01:00 - Lagos");
   const [language, setLanguage] = useState("English (UK)");
 
   // Devices
@@ -109,7 +109,7 @@ export default function SettingsPage() {
   const [webhookRetry, setWebhookRetry] = useState("Retry 3x");
   const [apiKey, setApiKey] = useState("gx_live_••••••••••••••••3f9a");
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [slackChannel, setSlackChannel] = useState("#guardian-alerts");
+  const [slackChannel, setSlackChannel] = useState("upss-alerts");
 
   const TABS: TabItem[] = [
     {

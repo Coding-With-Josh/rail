@@ -33,6 +33,11 @@ const DeviceMarker = ({ map, device, isSelected, onHover, onClick }: Props) => {
     return () => { markerRef.current?.remove() }
   }, [])
 
+  // Move the marker live when the device reports a new position.
+  useEffect(() => {
+    markerRef.current?.setLngLat(device.coordinates)
+  }, [device.coordinates[0], device.coordinates[1]])
+
   const color = statusColor[device.status]
   const isAlert = device.status === "alert"
 

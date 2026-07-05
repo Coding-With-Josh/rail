@@ -40,6 +40,8 @@ export type Device = {
   lastSeenAt: string | null;
   enrolledAt: string;
   latestHeartbeat: { battery: number | null; signal: number | null; status: string } | null;
+  lat: number | null;
+  lng: number | null;
 };
 
 export type PairingSession = {
@@ -50,6 +52,16 @@ export type PairingSession = {
   pairingCode: string;
   state: "pending" | "approved" | "expired" | "rejected";
   expiresAt: string;
+  createdAt: string;
+};
+
+export type Geofence = {
+  id: string;
+  organizationId: string;
+  name: string;
+  points: [number, number][]; // [lng, lat] pairs
+  isActive: boolean;
+  createdBy: string | null;
   createdAt: string;
 };
 
@@ -67,6 +79,14 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
+  },
+  geofences: {
+    list: () => apiFetch<{ geofences: Geofence[] }>("/geofences"),
+    create: (body: { name: string; points: [number, number][] }) =>
+      apiFetch<{ geofence: Geofence }>("/geofences", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: { name?: string; isActive?: boolean }) =>
+      apiFetch<{ geofence: Geofence }>(`/geofences/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    remove: (id: string) => apiFetch<{ ok: true }>(`/geofences/${id}`, { method: "DELETE" }),
   },
   auth: {
     me: () => apiFetch<{ user: { id: string; name: string; email: string; role: string; organizationId: string } }>("/auth/me"),

@@ -7,7 +7,9 @@ import { authRoutes } from "./modules/auth/auth.routes.js"
 import { deviceAuthRoutes } from "./modules/device-auth/device-auth.routes.js"
 import { deviceRoutes } from "./modules/device/device.routes.js"
 import { alertRoutes } from "./modules/alerts/alert.routes.js"
+import { geofenceRoutes } from "./modules/geofence/geofence.routes.js"
 import { wsGateway } from "./modules/websocket/ws.gateway.js"
+import { webhookRoutes } from "./modules/webhook/webhook.routes.js"
 
 export async function buildApp() {
   const app = Fastify({ logger: true })
@@ -25,6 +27,8 @@ export async function buildApp() {
   await app.register(deviceRoutes, { prefix: "/device" })   // heartbeat, telemetry
   await app.register(deviceRoutes, { prefix: "/devices" })  // list, get, revoke
   await app.register(alertRoutes, { prefix: "/alerts" })
+  await app.register(geofenceRoutes, { prefix: "/geofences" })
+  await app.register(webhookRoutes, { prefix: "/webhook" })
   await app.register(wsGateway)
 
   return app

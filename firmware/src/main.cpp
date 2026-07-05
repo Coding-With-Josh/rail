@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <TinyGPS++.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
@@ -41,6 +42,33 @@ String deviceId    = "";
 String deviceSecret= "";
 String accessToken = "";
 String refreshToken= "";
+
+// ── GPS (NEO-6M on UART2) ────────────────────────────────────────────────────
+#define GPS_RX_PIN 16   // ESP32 RX2  <- GPS TX  (data flows GPS -> ESP32)
+#define GPS_TX_PIN 17   // ESP32 TX2  -> GPS RX
+#define GPS_BAUD   9600 // NEO-6M default
+
+TinyGPSPlus  gps;
+HardwareSerial GPSserial(2);   // use hardware UART2
+double lastLat = 0.0, lastLng = 0.0;
+bool   hasFix  = false;
+
+// Pump every available byte from the GPS into the parser. MUST be called often —
+// the UART RX buffer overflows (and we drop fixes) if we block for too long.
+void feedGps() {
+  while (GPSserial.available() > 0) gps.encode(GPSserial.read());
+  if (gps.location.isValid()) {
+    lastLat = gps.location.lat();
+    lastLng = gps.location.lng();
+    hasFix  = true;
+  }
+}
+
+// delay() replacement that keeps draining the GPS while we wait.
+void smartDelay(unsigned long ms) {
+  unsigned long start = millis();
+  do { feedGps(); } while (millis() - start < ms);
+}
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 
@@ -269,10 +297,17 @@ void screenActive() {
   display.print(deviceId);
 
   display.setCursor(0, 40);
-  display.print(F("Status: ACTIVE"));
+  if (hasFix) {
+    display.print(lastLat, 5);
+    display.print(F(","));
+    display.print(lastLng, 5);
+  } else {
+    display.print(F("GPS: acquiring..."));
+  }
 
   display.setCursor(0, 52);
-  display.print(F("Heartbeat running"));
+  display.print(F("Sats: "));
+  display.print((unsigned long)gps.satellites.value());
   display.display();
 }
 
@@ -294,9 +329,21 @@ void screenError(const char* msg) {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+// Build a full URL from API_URL + path, tolerating a trailing slash on the
+// base and/or a missing leading slash on the path. Without this, a stray
+// trailing slash in credentials.ini produces "//device/..." which Fastify
+// treats as a different (non-existent) route and returns 404.
+String apiUrl(const String& path) {
+  String base = String(API_URL);
+  while (base.endsWith("/")) base.remove(base.length() - 1);
+  String p = path;
+  if (!p.startsWith("/")) p = "/" + p;
+  return base + p;
+}
+
 String apiPost(const char* path, const String& body) {
   HTTPClient http;
-  String url = String(API_URL) + path;
+  String url = apiUrl(path);
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   if (accessToken.length() > 0) {
@@ -336,7 +383,7 @@ void doBootstrap() {
 
 void doPollForApproval() {
   HTTPClient http;
-  String url = String(API_URL) + "/device/pairing/status?code=" + pairingCode;
+  String url = apiUrl("/device/pairing/status?code=" + pairingCode);
   http.begin(url);
   int code = http.GET();
   if (code <= 0) { http.end(); return; }
@@ -403,6 +450,16 @@ void doHeartbeat() {
   // battery placeholder
   doc["battery"] = 85;
 
+  // Attach last-known GPS fix so the dashboard can plot the device.
+  if (hasFix) {
+    doc["lat"] = lastLat;
+    doc["lng"] = lastLng;
+    Serial.printf("[GPS] %.6f, %.6f (sats %lu)\n", lastLat, lastLng, gps.satellites.value());
+  } else {
+    Serial.printf("[GPS] no fix yet (sats %lu, chars %lu)\n",
+                  gps.satellites.value(), gps.charsProcessed());
+  }
+
   String body;
   serializeJson(doc, body);
   apiPost("/device/heartbeat", body);
@@ -413,6 +470,10 @@ void doHeartbeat() {
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   Serial.begin(115200);
+  // Big RX buffer so a blocking WiFi/HTTP call can't overflow the UART and
+  // drop GPS bytes mid-sentence (which fails checksums → no fix is ever parsed).
+  GPSserial.setRxBufferSize(2048);
+  GPSserial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
   if (!display.begin(0x3C, true)) {
     Serial.println(F("Display not found"));
@@ -448,6 +509,7 @@ int frame = 0;
 
 void loop() {
   frame++;
+  feedGps();   // keep the GPS parser fed on every iteration
 
   switch (state) {
 
@@ -508,9 +570,10 @@ void loop() {
       // Heartbeat every 10 seconds
       if (millis() - lastHeartbeat > 10000) {
         doHeartbeat();
+        feedGps();        // drain anything that arrived during the blocking POST
         lastHeartbeat = millis();
       }
-      delay(1000);
+      smartDelay(1000);   // keep reading GPS instead of blocking
       break;
 
     case ERROR_STATE:

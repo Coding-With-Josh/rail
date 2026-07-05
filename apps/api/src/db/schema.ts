@@ -46,6 +46,8 @@ export const devices = pgTable("devices", {
   deviceType: text("device_type", { enum: ["esp32", "mobile"] }).notNull().default("esp32"),
   isOnline: boolean("is_online").notNull().default(false),
   isRevoked: boolean("is_revoked").notNull().default(false),
+  // "inside" | "outside" | "unknown" — persisted so geofence breach dedup survives API restarts
+  geofenceStatus: text("geofence_status").notNull().default("unknown"),
   lastSeenAt: timestamp("last_seen_at"),
   enrolledAt: timestamp("enrolled_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -136,5 +138,26 @@ export const alerts = pgTable("alerts", {
   acknowledgedBy: text("acknowledged_by").references(() => users.id),
   acknowledgedAt: timestamp("acknowledged_at"),
   resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+// Per-organization polygon safe zones. A device is "safe" when inside ANY active
+// zone; a breach is being outside all of them. `points` is an array of [lng, lat]
+// pairs (Mapbox order) stored as jsonb.
+export const geofences = pgTable("geofences", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  name: text("name").notNull(),
+  points: jsonb("points").notNull().$type<[number, number][]>(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: text("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const deviceIdentifiers = pgTable("device_identifiers", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  deviceId: text("device_id").notNull().references(() => devices.id, { onDelete: "cascade" }),
+  identifierType: text("identifier_type").notNull(),
+  identifierValue: text("identifier_value").notNull().unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 })

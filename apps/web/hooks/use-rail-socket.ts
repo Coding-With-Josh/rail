@@ -3,7 +3,9 @@
 import { useEffect, useRef, useCallback } from "react"
 
 export type RailEvent =
-  | { event: "device.heartbeat"; data: { deviceId: string; battery?: number; signal?: number; status: string; ts: number } }
+  | { event: "device.heartbeat"; data: { deviceId: string; battery?: number; signal?: number; status: string; lat?: number; lng?: number; ts: number } }
+  | { event: "alert.sos"; data: { alertId: string; deviceId: string; lat?: string; lng?: string; ts: number } }
+  | { event: "alert.geofence"; data: { alertId: string; deviceId: string; type: string; severity: string; message: string; lat?: string; lng?: string; ts: number } }
   | { event: "device.online" | "device.offline" | "device.revoked"; data: { deviceId: string } }
   | { event: string; data: unknown }
 

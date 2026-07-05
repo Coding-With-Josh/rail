@@ -2,7 +2,9 @@
 
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
+import { Toaster } from "sonner";
 import { CommandPalette } from "@/components/command-palette";
+import { AlertListener } from "@/components/alert-listener";
 import { ChevronLeft, ChevronRight, SidebarClose, SidebarOpen } from "lucide-react";
 import { signOutAction } from "@/lib/actions";
 import { useState } from "react";
@@ -67,6 +69,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen dark:bg-[#0f0f0f] bg-[#d9d9d9] overflow-hidden">
       <CommandPalette />
+      <AlertListener />
+      <Toaster richColors position="top-right" />
 
       {/* Mobile backdrop */}
       <AnimatePresence>
